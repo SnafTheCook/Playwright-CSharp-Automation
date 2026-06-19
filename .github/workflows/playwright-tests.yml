@@ -1,0 +1,60 @@
+name: E2E UI Automation (Playwright + xUnit v3)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: 
+
+jobs:
+  run-e2e-tests:
+    name: Execute Playwright Suite
+    timeout-minutes: 15
+    runs-on: ubuntu-latest 
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10 Environment
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet Packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Build Test Project
+        run: dotnet build -c Release
+
+      - name: Cache Playwright Browsers
+        id: cache-playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright 
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/*.csproj') }}
+
+      - name: Install Playwright Browsers and Linux Dependencies
+        if: steps.cache-playwright.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path . -Filter "playwright.ps1" -Recurse | Select-Object -First 1
+          if ($installer) {
+              Write-Host "Found installer at: $($installer.FullName)"
+              & $installer.FullName install --with-deps
+          } else {
+              Write-Error "playwright.ps1 not found! Build step might have failed."
+          }
+
+      - name: Execute xUnit v3 Suite Natively
+        shell: pwsh
+        run: |
+          $project = Get-ChildItem -Path . -Filter "*.csproj" -Recurse | Select-Object -First 1
+          Write-Host "Executing test project: $($project.FullName)"
+          dotnet run --project $project.FullName -c Release
